@@ -1,0 +1,510 @@
+---
+title: "Exercise 1 - Shreyas K.S."
+output: html_document
+---
+```{r setup, include=FALSE}
+
+```
+## Introduction
+The following report contains 4 sections including an exploratory analysis of 2000 election results, bootstrapping in a financial context using ETFs, unsupervised learning on data on wines, and market segmentation.
+
+Before starting on each of the individual sections, as a best practice, I loaded all required libraries and set a seed at the top of the R code.
+
+
+```{R, echo=FALSE, include=FALSE}
+require(lattice)
+require(ggplot2)
+library(mosaic)
+library(fImport)
+library(foreach)
+```
+
+```{R}
+my_seed = 59058
+```
+
+
+
+
+## Exploratory Analysis
+
+```{R, echo=FALSE}
+georgia = read.csv("georgia2000.csv")
+wine = read.csv("wine.csv")
+marketing = read.csv("social_marketing.csv")
+```
+
+The following bars show the votes received by Bush (in red) and votes received by Gore (in blue) by county. 
+
+```{r, echo=FALSE}
+ggplot(georgia)+ geom_bar(aes(county, bush),stat="identity", fill="red", alpha=0.5)+ coord_flip()+
+geom_bar(aes(county, gore),stat="identity", fill="blue", alpha=0.5)+
+theme(text = element_text(size=7),
+axis.text.x = element_text(angle=90, vjust=1)) 
+```
+
+It is clear that Bush won in more counties than Gore, since the red bars overshadow blue bars in most cases. Other than the county of Dekalb, where there is a clear anomaly and Gore dominated Bush. 
+
+A new variable is created to measure the difference in votes and ballots:
+
+```{r}
+georgia$votediff = georgia$ballots - georgia$votes
+georgia$votediff = scale(georgia$votediff) 
+```
+
+The variable needs to be scaled in order to adjust for differences in population across counties. For example, a `votediff` of 20 in a county with population of 1000 is more drastic than in a county with population of 200,000. Looking at the scaled difference in votes and ballots by state, we get the following:
+
+```{r, echo=FALSE}
+ggplot(georgia, aes(county,votediff,color=equip))+geom_point()+
+  theme(text = element_text(size=7),
+        axis.text.x = element_text(angle=90, vjust=1)) 
+```
+
+The following are factors which would affect voting in any location, regardless of the failure or success of equipment and voting mechanisms in any county. Hence, we can take them to be systematic risk in this context: 
+
+* voting for multiple candidates
+* not voting for any candidate
+* vote disqualified for other reasons
+
+Lets analyze the outliers closely. In all the counties where there is a huge discrepancy (more ballots than votes recorded), punch ballots have been used. This is the clearest indicator of fraud in the given data. The normalized difference between ballots cast and votes recorded is more than 2 standard deviations from the mean.
+
+Lets look at some metrics for these counties:
+
+```{r, echo=FALSE}
+g1 = subset(georgia, votediff>1.5)
+g2 = subset(georgia, votediff<1.5)
+g1$inTop3 = c(1)
+g2$inTop3 = c(0)
+newgeorgia = rbind(g1,g2)
+ggplot(newgeorgia, aes(county,perAA,color=factor(inTop3)))+geom_point()+
+  theme(text = element_text(size=7),
+        axis.text.x = element_text(angle=90, vjust=1)) + ggtitle("Percentage African 
+      American population by county") + theme(legend.title=element_blank())
+```
+
+The 3 'suspect' counties have a relatively high proportion of African Americans compared to the rest of Georgia, as seen from the blue points. 
+
+```{R, echo=F}
+newframe = data.frame(g1$county, g1$poor)
+colnames(newframe) <- c("County", "Poor")
+newframe
+
+newframe1 = data.frame(g1$county, g1$urban)
+colnames(newframe1) <- c("County", "Urban")
+newframe1
+
+newframe2 = data.frame(g1$county, g1$bush, g1$gore, g1$gore-g1$bush)
+colnames(newframe2) <- c("County", "Bush Votes", "Gore Votes", "Difference")
+newframe2
+```
+
+Finally, we can also see that voters from these counties are not poor, are in urban areas, and predominantly voted for Gore over Bush (when the votes were recorded). We don't need to worry much about poor populations being affected, but we cannot conclude from this data whether areas which support Gore have been under represented due to the suspected fraud, or if Bush's dominance has been  understated due to fraud.
+
+
+
+## Bootstrapping
+
+###  The Even Split
+For the case of the even split, the 5 specified ETFs are used: 
+
+- US domestic equities (SPY)
+- US Treasury bonds (TLT)
+- Investment-grade corporate bonds (LQD)
+- Emerging-market equities (EEM)
+- Real estate (VNQ)
+
+```{R, echo=F}
+split_portfolio_ETFs = c("SPY", "TLT", "LQD", "EEM","VNQ")
+split_portfolio = yahooSeries(split_portfolio_ETFs, from='2010-07-01', to='2015-07-30')
+#summary(split_portfolio)
+YahooPricesToReturns = function(series) {
+  mycols = grep('Adj.Close', colnames(series))
+  closingprice = series[,mycols]
+  N = nrow(closingprice)
+  percentreturn = as.data.frame(closingprice[2:N,]) / as.data.frame(closingprice[1:(N-1),]) - 1
+  mynames = strsplit(colnames(percentreturn), '.', fixed=TRUE)
+  mynames = lapply(mynames, function(x) return(paste0(x[1], ".PctReturn")))
+  colnames(percentreturn) = mynames
+  as.matrix(na.omit(percentreturn))
+}
+split_portfolio_returns = YahooPricesToReturns(split_portfolio)
+```
+
+The mean percentage return of each ETF is as follows:
+```{r, echo=FALSE}
+mean_return = colMeans(split_portfolio_returns)
+mean_return
+```
+
+We can see that on average, SPY returns about 0.068%, and other stocks return less.
+
+The pairwise correlations for this portfolio is as follows:
+
+```{r, echo=FALSE}
+pairs(split_portfolio_returns)
+```
+
+It is clear from the pairwise correlations within the portfolio there is a strong positive correlation between EEM and SPY, LQD and TLT, VNQ and SPY, and EEM and VNQ. The SPY index is representative of the 500 largest stocks in the US. Stocks which have a positive correlation with SPY, VNQ and EEM, are relatively stable stocks to hold since they follow the market. 
+
+TLT and LQD, on the other hand, either have negative or no correlation with SPY, which is a good way to diversify the portfolio. TLT and LQD have lower returns. It is clear that these ETFs are in the portfolio to reduce the systematic risk involved in having ETFs positively correlated with the market. Idiosyncratic risk, however, cannot be reduced even through excessive diversification. 20% representation of the ETFs in this portfolio would be a good middle ground to compare a conservative and aggressive portfolio against.
+
+Next, let's look at the covariance matrix:
+
+```{r, echo=FALSE}
+cov(split_portfolio_returns)
+```
+
+```{r, include=FALSE}
+weighted_returns = split_portfolio_returns*c(0.2,0.2,0.2, 0.2, 0.2)
+weighted_returns
+```
+
+The mean returns for the portfolio is as follows:
+
+```{r, echo=FALSE} 
+wr = mean(weighted_returns[1,])+ mean(weighted_returns[2,])+mean(weighted_returns[3,])+
+  mean(weighted_returns[4,])+mean(weighted_returns[5,])
+wr
+```
+
+On average, the portfolio returns 0.004%. Next, lets bootstrap returns on this portfolio for the 5 year trading period. We have returns of the portfolio over 1278 days, and the 4 week trading period consists of 20 days. Hence, we trade over `r 1278/20` periods. Although this number seems odd, it gives us the precise returns (and total wealth) for a 20 day trading period in the given time frame. The selected seed is used to maintain reproducibility of results.
+
+Each iteration of the bootstrap simulates one possible complete trading cycle. The following histogram shows the spread of total wealth each iteration of the bootstrap (for a total of 500 iterations).
+
+```{r, echo=FALSE}
+n_days = 20
+set.seed(my_seed)
+sim1 = foreach(i=1:500, .combine='rbind') %do% {
+  totalwealth = 100000
+  weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+  holdings = weights * totalwealth
+  wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+  for(today in 1:n_days) {
+    weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+    holdings = weights * totalwealth
+    return.today = resample(split_portfolio_returns, 1, orig.ids=FALSE)
+    holdings = holdings + holdings*return.today
+    totalwealth = sum(holdings)
+    wealthtracker[today] = totalwealth
+  }
+  wealthtracker
+}
+hist(sim1[,n_days], 50, main="Distribution of Wealth")
+```
+
+The following histogram shows the profit and loss per trading day over the 500 iterations of the bootstrap:
+
+```{r, echo=FALSE}
+hist(sim1[,n_days]- 100000, main="Profit/Loss per Trading Day")
+var=quantile(sim1[,n_days], 0.05) - 100000
+```
+
+The 5% VaR of this portfolio is `r var`
+
+
+### The Conservative Portfolio
+In the conservative portolio, I move away from emerging markets and real estate. I include the iShares Conservative allocation and Vanguard's Conservative ETF. I anticipate there will be a high correlation between these newly added ETFs, but the proportion of fixed income assets in these ETFs are favorable to the conservative investor.
+
+- US domestic equities (SPY)
+- US Treasury bonds (TLT)
+- Investment-grade corporate bonds (LQD)
+- iShares Conservative allocation (AOK)
+- Vanguard Conservative Growth Fund (VSCGX) 
+
+```{R, echo=F}
+cons_portfolio_ETFs = c("SPY", "TLT", "LQD", "AOK","VSCGX")
+cons_portfolio = yahooSeries(cons_portfolio_ETFs, from='2010-07-01', to='2015-07-30')
+#summary(split_portfolio)
+cons_portfolio_returns = YahooPricesToReturns(cons_portfolio)
+```
+
+The mean percentage return of each ETF is as follows:
+
+```{r, echo=FALSE}
+mean_return = colMeans(cons_portfolio_returns)
+mean_return
+```
+
+Returns on each ETF are significantly lower than the SPY return of 0.068%.
+
+The pairwise correlations for this portfolio is as follows:
+
+```{r, echo=FALSE}
+pairs(cons_portfolio_returns)
+```
+
+
+Next, let's look at the covariance matrix:
+
+```{r, echo=FALSE}
+cov(cons_portfolio_returns)
+```
+
+The variance of the new ETFs is smaller than the variance of ETFs included in the previous portfolio. 
+
+```{r, include=FALSE}
+weighted_returns2 = cons_portfolio_returns*c(0.2,0.2,0.2, 0.2, 0.2)
+weighted_returns2
+```
+
+The mean returns for the portfolio is as follows:
+
+```{r, echo=FALSE} 
+wr2 = mean(weighted_returns2[1,])+ mean(weighted_returns2[2,])+mean(weighted_returns2[3,])+
+  mean(weighted_returns2[4,])+mean(weighted_returns2[5,])
+wr2
+```
+
+On average, the portfolio returns 0.002%. Again, lets run a bootstrap with 500 iterations.
+
+```{r, echo=FALSE}
+n_days = 20
+set.seed(my_seed)
+sim2 = foreach(i=1:500, .combine='rbind') %do% {
+  totalwealth = 100000
+  weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+  holdings = weights * totalwealth
+  wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+  for(today in 1:n_days) {
+    weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+    holdings = weights * totalwealth
+    return.today = resample(cons_portfolio_returns, 1, orig.ids=FALSE)
+    holdings = holdings + holdings*return.today
+    totalwealth = sum(holdings)
+    wealthtracker[today] = totalwealth
+  }
+  wealthtracker
+}
+hist(sim2[,n_days], 50, main="Distribution of Wealth")
+```
+
+The following histogram shows the profit and loss per trading day over the 500 iterations of the bootstrap:
+
+```{r, echo=FALSE}
+hist(sim2[,n_days]- 100000, main="Profit/Loss per trading day")
+var2=quantile(sim2[,n_days], 0.05) - 100000
+```
+
+We can see clearly that compared to the previous portfolio, the variance in returns for the conservative portfolio is significantly lower. The 5% VaR of this portfolio is `r var2`, which is significantly lower than the 5% VaR of the balanced portfolio.
+
+### The Aggressive Portfolio
+Next, lets look at a more aggressive portfolio. In the aggressive portolio, there is a focus on high return ETFs. Vanguard's high yield ETF and iShares Healthcare Providers ETF are included, along with EEM and VNQ. These were chosen due to their reputation for being aggressive, and availability of data at daily frequency as opposed to other ETFs which Yahoo collected data on at a lower frequency.
+
+- US domestic equities (SPY)
+- Vanguard High Yield Corporate Fund (VWEHX)
+- iShares Healthcare Providers Fund (IHF)
+- Emerging-market equities (EEM)
+- Real estate (VNQ)
+
+```{R, echo=F}
+agg_portfolio_ETFs = c("SPY", "VWEHX", "IHF", "EEM","VNQ")
+agg_portfolio = yahooSeries(agg_portfolio_ETFs, from='2010-07-01', to='2015-07-30')
+#summary(split_portfolio)
+agg_portfolio_returns = YahooPricesToReturns(agg_portfolio)
+```
+
+The mean percentage return of each ETF is as follows:
+
+```{r, echo=FALSE}
+mean_return3 = colMeans(agg_portfolio_returns)
+mean_return3
+```
+
+Returns on VWEHX are surprisingly lower than the SPY return, which is counter intuitive for high risk portfolios. However, the return on IHF is relatively high.
+
+The pairwise correlations for this portfolio is as follows:
+
+```{r, echo=FALSE}
+pairs(agg_portfolio_returns)
+```
+
+IHF seems to be more strongly correlated with the market than VWEHX. This might explain the unexpected low return on VWEHX.
+
+Next, let's look at the covariance matrix:
+
+```{r, echo=FALSE}
+cov(agg_portfolio_returns)
+```
+
+The variance of the new ETFs is generally larger than the variance of conservative ETFs included in the previous portfolio. 
+
+```{r, include=FALSE}
+weighted_returns3 = agg_portfolio_returns*c(0.2,0.2,0.2, 0.2, 0.2)
+weighted_returns3
+```
+
+The mean returns for the portfolio is as follows:
+
+```{r, echo=FALSE} 
+wr3 = mean(weighted_returns3[1,])+ mean(weighted_returns3[2,])+mean(weighted_returns3[3,])+
+  mean(weighted_returns3[4,])+mean(weighted_returns3[5,])
+wr3
+```
+
+On average, the portfolio returns 0.007%. This is significantly larger than the returns from conservative (0.02%) and split (0.04%) portfolios. Again, lets run a bootstrap with 500 iterations.
+
+```{r, echo=FALSE}
+n_days = 20
+set.seed(my_seed)
+sim3 = foreach(i=1:500, .combine='rbind') %do% {
+  totalwealth = 100000
+  weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+  holdings = weights * totalwealth
+  wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+  for(today in 1:n_days) {
+    weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+    holdings = weights * totalwealth
+    return.today = resample(agg_portfolio_returns, 1, orig.ids=FALSE)
+    holdings = holdings + holdings*return.today
+    totalwealth = sum(holdings)
+    wealthtracker[today] = totalwealth
+  }
+  wealthtracker
+}
+hist(sim3[,n_days], 50, main="Distribution of Wealth")
+```
+
+The following histogram shows the profit and loss per trading day over the 500 iterations of the bootstrap:
+
+```{r, echo=FALSE}
+hist(sim3[,n_days]- 100000, main="Profit/Loss per trading day")
+var3 = quantile(sim3[,n_days], 0.05) - 100000
+```
+We can see clearly that compared to the other portfolios, the variance in returns for the aggressive portfolio is higher. The 5% VaR of this portfolio is `r var3`, which is significantly higher than the 5% VaR of the other portfolios. 
+
+The following table shows the mean returns and VaR for each portfolio:
+
+Portfolio     Mean Return       VaR
+---------    --------------     ----    
+Split         `r wr`            `r var`    
+Conservative  `r wr2`           `r var2`    
+Aggressive    `r wr3`           `r var3`   
+
+The next graph shows each portfolio's bootstrapped mean returns (keep in mind a seed has been set and called to maintain consistency of 'events' that occur in each iteration of the bootstrap) and 5% VaR. As expected, the aggressive portfolio has the smallest VaR and conservative portfolio has the largest VaR. The returns are also increasing as the composition of risky assets in the portfolio increases.
+
+```{r, echo=FALSE}
+myportfolios = c("Split", "Conservative", "Aggressive")
+Portfolio_Return = c(wr,wr2,wr3)
+ValueAtRisk = c(var,var2,var3)
+p = data.frame(Portfolio_Return, ValueAtRisk, row.names = myportfolios)
+ggplot(p, aes(Portfolio_Return, ValueAtRisk)) + geom_point() + geom_text(aes(label=myportfolios))+xlim(0,0.01)+ylim(-6000,-1000)
+```
+
+The table and graph of Mean Returns against VaR is a good measure of the risk profile of a portfolio. Based on the risk aversiveness of the investor, a portfolio can be chosen from the 3 choices. Additionally, this exercise can be repeated with different ETFs to compare how other portfolio combinations perform in a bootstrap test.
+
+## Clustering and PCA
+Clustering and PCA will be used to classify the wines into their categories. I hypothesize that clustering will be inappropriate and difficult to understand or justify since the data contains the color of wine as categorical variables. On the other hand, PCA aims to reduce the dimensions in the attribute, and classification or dimension reduction will be less rigid than clustering.
+
+First, lets cluster the data and look at the clusters formed. First of all, let's look at how a run with 2 clusters looks based on quality:
+
+```{r, echo=F}
+wine_scaled <- scale(wine[,-(12:13)], center=TRUE, scale=TRUE) 
+mu = attr(wine_scaled,"scaled:center")
+sigma = attr(wine_scaled,"scaled:scale")
+clust1 = kmeans(wine_scaled, 2, nstart=500)
+qplot(color, quality, data=wine, color=factor(clust1$cluster))
+```
+
+We don't learn much from the above plot, so lets look at how well k means clustering identifies color in general. Lets look at how well clustering sorts the wines with respect to alcohol content:
+
+```{r, echo=F}
+qplot(color, alcohol, data=wine, color=factor(clust1$cluster))
+```
+
+Increasing the number of clusters to 5, however, yields some results which are difficult to interpret:
+
+```{r, echo=F}
+clust2 = kmeans(wine_scaled, 5, nstart=500)
+qplot(color, alcohol, data=wine, color=factor(clust2$cluster))
+```
+
+After some iterations with different means, I came to the conclusion that k-means clustering is only useful when k=2 for this data. Next, lets look at hierarchical clustering. Hierarchical clustering is done using average distance, and the following shows the number of points in each tree:
+
+```{r, echo=F}
+D_wine = dist(wine_scaled, method='euclidean')
+hier_wine = hclust(D_wine, method='average')
+cluster1 = cutree(hier_wine, k=10)
+summary(factor(cluster1))
+```
+
+A majority of the points fall under one of the 10 trees, which is not an even split. Similar results can be expected from a tree with a different number of levels. Hence, hierarchical clustering is not a good model for this data.
+
+Next, I attempt PCA on this data. The following graph plots PC1 against PC2, sorted by color:
+
+```{r, echo=F}
+pc2 = prcomp(wine_scaled, scale=TRUE)
+loadings = pc2$rotation
+scores = pc2$x
+qplot(scores[,1], scores[,2], color=wine$color, xlab='PC 1', ylab='PC 2')
+```
+
+We can successfully distinguish between red and white wines from PC1. In general, a positive value in the vector of component 1 corresponds closely to white wine, and a negative value in the vector of component 1 corresponds to red wine. Let's look at these elements. The following is the loadings output of component 1, sorted by highest to lowest:
+
+```{r, include=F}
+loadings[,1]
+pc1ord = order(-loadings[,1])
+pc1ord
+r1 <- as.data.frame(rownames(loadings)[pc1ord])
+```
+
+```{r, echo=F}
+r1
+```
+
+Different forms of sulfur dioxide seem to be the detrimental chemicals in white wine. Residual sugar is the next largest component. 3 of those chemicals have high covariance with each other, and are a detrimental component of PC1. In the opposite direction, volatile acidity, sulphates, and chlorides have high covariance. From the first component, we are able to categorize the wines by 6 of the given 11 variables. 
+
+Both PCA and clustering are able to distinguish between red and white wines. Comparing PCA and clustering, I find that PCA has produced better results in two ways. From a methodological perspective, PCA is more efficient than clustering. PCA is naturally able to characterize the elements which give each color of wine its properties. Additionally, the output from clustering might not yield desirable results with other variations of k.
+
+## Market Segmentation
+
+Given the dimensions of the data, the most useful tool in this situation would be a dimension reduction method. First of all, some clean up needs to be done. The column for uncategorized tweets is dropped from the data. Trying to categorize or explain an uncategorized variable using PCA defeats the purpose of the components. Measuring covariance between an uncategorized vector and any other vector is counter intuitive and not interpretable. Since the PCA algorithm takes into account all the variables and will consider the effect of being in no category, it is dropped.
+
+The plot of components 1 against 2 is as follows:
+
+```{r,echo=F}
+market_scaled = scale(marketing[,-c(1,6)])
+pc_market = prcomp(market_scaled, scale=TRUE)
+loadings = pc_market$rotation
+scores = pc_market$x
+qplot(scores[,1], scores[,2], color=as.factor(marketing$adult) , xlab='Component 1', ylab='Component 2')
+```
+
+In the above plot, the tweets which have been categorized as adults are spread out. Lets look at tweets which have been categorized as spam on a plot of principal components:
+
+```{r, echo=F}
+qplot(scores[,1], scores[,2], color=as.factor(marketing$spam) , xlab='Component 1', ylab='Component 2')
+```
+
+The tweets marked as spam are slightly better categorized, but we are unable to draw a decent conclusion due to the small number of data points and spread of points. Lets take a look at the first principal component:
+
+```{r, include=F}
+loadings[,1]
+pc1ord = order(-loadings[,1])
+pc1ord
+r1 <- as.data.frame(rownames(loadings)[pc1ord])
+```
+
+```{r, echo=F}
+r1
+```
+
+We see that in the first principal component, adult and spam are actually the variables with the lowest values. Hence, the spam and adult labels do not vary much with the other variables. Religion, food, parenting, sports fandom, school, family, beauty, crafts, cooking, and fashion vary together in the first principal component. These generally relate to married adults.  
+
+Lets look closely at the categories of the second principal component:
+
+```{r, echo=F}
+pc2ord = order(-loadings[,2])
+pc2ord
+r2 <- as.data.frame(rownames(loadings)[pc2ord])
+```
+
+Again, we see some of the same components repeating. Religion, parenting, sports fandom, and food are among the top components. In the opposite direction, beauty, cooking, and fashion are also significant in this component. We can assume that the first customer segment is parents. Lets test this hypothesis using a biplot of both principal components.
+
+```{r, echo=F}
+biplot(scores[,1:2], loadings[,1:2], cex=0.7)
+```
+
+
+Like seen earlier, sports fandom, food, religion, and parenting are strong components in the same direction. Hence, the hypothesis is right. There is a distinct 90 degree angle between 2 large sets of components, which suggests there could be 2 distinct customer segments. The second customer segment seems to be heavily based on fashion, photo sharing, beauty, outdoors, personal fitness, and online gaming. This customer segment seems to correspond more to the younger population, teenagers. 
+
+In conclusion, the two major customer segments we can distinguish from principal component analysis is parents and teenagers. 
